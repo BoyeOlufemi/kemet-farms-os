@@ -28,7 +28,9 @@ import {
   Activity, 
   Sprout, 
   Award, 
-  AlertTriangle 
+  AlertTriangle,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface AnalyticsProps {
@@ -48,6 +50,65 @@ export default function Analytics({ fields, cropLogs, staff }: AnalyticsProps) {
     setSelectedField('all');
     setSelectedCrop('all');
     setTimeRange('7d');
+  };
+
+  // Export crop performance logs to CSV file for external reporting
+  const handleExportCSV = () => {
+    const filteredLogs = cropLogs.filter(log => {
+      const fieldObj = fields.find(f => f.id === log.field_id);
+      if (selectedField !== 'all' && log.field_id !== selectedField) return false;
+      if (selectedCrop !== 'all' && fieldObj?.crop_type !== selectedCrop) return false;
+      return true;
+    });
+
+    const headers = [
+      'Log ID',
+      'Field Name',
+      'Crop Type',
+      'Action Type',
+      'Status',
+      'Assigned Staff',
+      'Scheduled Date',
+      'Completed At',
+      'Verified At',
+      'Notes & Observations'
+    ];
+
+    const rows = filteredLogs.map(log => {
+      const fieldObj = fields.find(f => f.id === log.field_id);
+      const staffObj = staff.find(s => s.id === log.staff_id);
+
+      const fieldName = fieldObj ? fieldObj.name : log.field_id;
+      const cropType = fieldObj ? fieldObj.crop_type : 'N/A';
+      const staffName = staffObj ? staffObj.name : log.staff_id;
+      const completedAt = log.completed_at ? new Date(log.completed_at).toLocaleString('en-NG') : 'N/A';
+      const verifiedAt = log.verified_at ? new Date(log.verified_at).toLocaleString('en-NG') : 'N/A';
+
+      return [
+        log.id,
+        fieldName,
+        cropType,
+        log.action_type,
+        log.action_status,
+        staffName,
+        log.scheduled_time || 'N/A',
+        completedAt,
+        verifiedAt,
+        log.notes || ''
+      ].map(val => `"${String(val).replace(/"/g, '""')}"`);
+    });
+
+    const csvData = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.setAttribute('download', `kemet_crop_performance_logs_${selectedCrop.toLowerCase()}_${timestamp}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // 1. DYNAMIC DATA CALCULATION: Staff Activity Metrics
@@ -277,6 +338,16 @@ export default function Analytics({ fields, cropLogs, staff }: AnalyticsProps) {
               </button>
             ))}
           </div>
+
+          {/* Export CSV Button */}
+          <button
+            onClick={handleExportCSV}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-2xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+            title="Export crop performance logs to CSV file"
+          >
+            <Download size={13} />
+            <span>Export CSV</span>
+          </button>
 
           {/* Reset Filter Button */}
           {(selectedField !== 'all' || selectedCrop !== 'all' || timeRange !== '7d') && (
@@ -640,7 +711,90 @@ export default function Analytics({ fields, cropLogs, staff }: AnalyticsProps) {
 
       </div>
 
-      {/* 5. Bottom Insights Panel */}
+      {/* 5. Crop Performance Log Records Table (Exportable Data) */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-3xs space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h4 className="font-bold text-xs text-gray-800 font-display flex items-center space-x-2">
+              <FileSpreadsheet size={16} className="text-emerald-600" />
+              <span>Crop Performance & Field Action Logs</span>
+            </h4>
+            <p className="text-3xs text-gray-400 mt-0.5">
+              Filtered records matching selected field ({selectedField === 'all' ? 'All Fields' : fields.find(f => f.id === selectedField)?.name}) and crop ({selectedCrop === 'all' ? 'All Crops' : selectedCrop})
+            </p>
+          </div>
+
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-2xs font-bold transition-all flex items-center space-x-2 cursor-pointer shadow-2xs"
+          >
+            <Download size={14} />
+            <span>Export CSV Report</span>
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-2xs">
+            <thead>
+              <tr className="border-b border-gray-100 text-gray-400 uppercase font-mono text-[9px] tracking-wider bg-gray-50/50">
+                <th className="py-2.5 px-3 rounded-l-lg">Log ID</th>
+                <th className="py-2.5 px-3">Field</th>
+                <th className="py-2.5 px-3">Crop</th>
+                <th className="py-2.5 px-3">Action Type</th>
+                <th className="py-2.5 px-3">Status</th>
+                <th className="py-2.5 px-3">Operator</th>
+                <th className="py-2.5 px-3 rounded-r-lg">Completed At</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50 font-sans">
+              {cropLogs
+                .filter(log => {
+                  const fieldObj = fields.find(f => f.id === log.field_id);
+                  if (selectedField !== 'all' && log.field_id !== selectedField) return false;
+                  if (selectedCrop !== 'all' && fieldObj?.crop_type !== selectedCrop) return false;
+                  return true;
+                })
+                .map(log => {
+                  const fieldObj = fields.find(f => f.id === log.field_id);
+                  const staffObj = staff.find(s => s.id === log.staff_id);
+
+                  return (
+                    <tr key={log.id} className="hover:bg-gray-50/60 transition-colors">
+                      <td className="py-2.5 px-3 font-mono font-bold text-gray-700">{log.id}</td>
+                      <td className="py-2.5 px-3 font-medium text-gray-800">{fieldObj ? fieldObj.name : log.field_id}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="font-mono text-[9px] px-2 py-0.5 rounded-md bg-gray-100 font-bold text-gray-600">
+                          {fieldObj ? fieldObj.crop_type : 'PALM'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-gray-800">{log.action_type}</td>
+                      <td className="py-2.5 px-3">
+                        <span className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                          log.action_status === 'done'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                            : log.action_status === 'todo'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                            : 'bg-rose-50 text-rose-700 border border-rose-200/60'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${
+                            log.action_status === 'done' ? 'bg-emerald-500' : log.action_status === 'todo' ? 'bg-amber-500' : 'bg-rose-500'
+                          }`} />
+                          <span className="capitalize">{log.action_status}</span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-gray-600">{staffObj ? staffObj.name : log.staff_id}</td>
+                      <td className="py-2.5 px-3 font-mono text-gray-500 text-[10px]">
+                        {log.completed_at ? new Date(log.completed_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Pending'}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 6. Bottom Insights Panel */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 flex flex-col md:flex-row justify-between gap-5 text-slate-100">
         <div className="space-y-1.5 max-w-2xl">
           <h5 className="text-xs font-bold font-display uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">

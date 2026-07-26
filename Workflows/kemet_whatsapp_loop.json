@@ -1,0 +1,214 @@
+{
+  "name": "Kemet WhatsApp Loop",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "kemet-whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-inbound",
+      "name": "WhatsApp Inbound Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [80, 80],
+      "webhookId": "kemet-whatsapp-inbound",
+      "notes": "Inbound WhatsApp payload from Twilio"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.all()[0].json;\nconst from = payload.From || payload.from;\nconst body = (payload.Body || payload.body || '').trim().toLowerCase();\nconst cropLogId = payload.crop_log_id || null;\nreturn [{ json: { from, body, cropLogId } }];\n"
+      },
+      "id": "normalize",
+      "name": "Normalize Inbound",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 80]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "kemet_whatsapp_messages",
+        "columns": ["from_number", "to_number", "direction", "body", "crop_log_id"],
+        "values": ["={{ $json.from }}", "={{ $('WhatsApp Inbound Webhook').item.json.To || '+14155238886' }}", "inbound", "={{ $json.body }}", "={{ $json.cropLogId || 'null' }}"]
+      },
+      "id": "save-inbound",
+      "name": "Save Inbound Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [560, 80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body.toLowerCase();\nif (body.includes('confirm') || body.includes('done') || body.includes('yes')) {\n  return [{ json: { intent: 'confirm', cropType: body.includes('palm') ? 'PALM' : 'SOYBEAN', raw: $json.body } }];\n}\nif (body.includes('stop') || body.includes('unsubscribe')) {\n  return [{ json: { intent: 'stop', raw: $json.body } }];\n}\nreturn [{ json: { intent: 'unknown', raw: $json.body } }];\n"
+      },
+      "id": "classify",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intent }}",
+              "value2": "confirm"
+            }
+          ]
+        }
+      },
+      "id": "if-confirm",
+      "name": "IF Confirm",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1040, 80]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "kemet_crop_logs",
+        "match": "id={{ $('Normalize Inbound').item.json.cropLogId }}",
+        "values": "action_status=verified,verified_at=now()"
+      },
+      "id": "update-log",
+      "name": "Update Crop Log",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1280, 20]
+    },
+    {
+      "parameters": {
+        "jsCode": "const confirmed = $json.cropType;\nconst fieldId = $('Normalize Inbound').item.json.cropLogId || 'field-unknown';\nconst message = confirmed === 'PALM'\n  ? '✅ Palm action confirmed for ' + fieldId + '. Next: monthly weed ring check.'\n  : '✅ Soybean action confirmed for ' + fieldId + '. Next: moisture check at day 45.';\nreturn [{ json: { to: $('Normalize Inbound').item.json.from, message } }];\n"
+      },
+      "id": "compose-reply",
+      "name": "Compose Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 160]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "create",
+        "messagesToSend": 1,
+        "contentType": "text",
+        "text": "={{ $json.message }}",
+        "toPhoneNumber": "={{ $json.to }}",
+        "fromPhoneNumber": "+14155238886"
+      },
+      "id": "twilio-reply",
+      "name": "Twilio Send Reply",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1520, 100]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "kemet_whatsapp_messages",
+        "columns": ["from_number", "to_number", "direction", "body", "crop_log_id"],
+        "values": ["={{ $('Twilio Send Reply').item.json.twilio.from }}", "={{ $json.to }}", "outbound", "={{ $json.message }}", "={{ $('Normalize Inbound').item.json.cropLogId || 'null' }}"]
+      },
+      "id": "save-reply",
+      "name": "Save Outbound Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1760, 100]
+    }
+  ],
+  "connections": {
+    "WhatsApp Inbound Webhook": [
+      [
+        {
+          "node": "Normalize Inbound",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Normalize Inbound": [
+      [
+        {
+          "node": "Save Inbound Message",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Save Inbound Message": [
+      [
+        {
+          "node": "Classify Intent",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Classify Intent": [
+      [
+        {
+          "node": "IF Confirm",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "IF Confirm": {
+      "true": [
+        [
+          {
+            "node": "Update Crop Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "false": [
+        [
+          {
+            "node": "Compose Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Crop Log": [
+      [
+        {
+          "node": "Compose Reply",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Compose Reply": [
+      [
+        {
+          "node": "Twilio Send Reply",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Twilio Send Reply": [
+      [
+        {
+          "node": "Save Outbound Message",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ]
+  },
+  "pinData": {},
+  "settings": {},
+  "versionId": "kemet-whatsapp-v1",
+  "meta": {
+    "editorVersion": "1.x"
+  },
+  "id": "kemet-whatsapp-loop",
+  "tags": ["kemet", "farms", "whatsapp"]
+}

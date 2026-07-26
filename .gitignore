@@ -1,0 +1,35 @@
+# Dependencies & Builds
+node_modules
+dist
+*.local
+
+# Secrets
+*.env
+.env
+.n8n/**
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Local generator scripts / absolute local paths
+/build_*.py
+/build_*.sh
+/build_*.mjs
+/simulator/**/tmp_*
+/simulator/**/seg_*
+
+# Large runtime outputs / videos / screenshots
+Simulator/screenshots/*
+!Simulator/screenshots/README.md
+
+# Absolute-path build artifacts inside simulator
+Simulator/workflow-videos/exocore_*.mp4
+Simulator/workflow-videos/kemet_*.mp4
+Simulator/workflow-videos/deployment-asset/**
+Simulator/workflow-videos/build_*.mjs
+Simulator/workflow-videos/concat*.txt
+Simulator/whatsapp_simulator.html
+
+# n8n credential exports, if ever added
+credentials.json

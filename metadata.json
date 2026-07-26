@@ -1,0 +1,10 @@
+{
+  "name": "Kemet Farms OS",
+  "description": "Interactive simulation, weather automation trigger engine, and operations dashboard for Kemet Farms crop management.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

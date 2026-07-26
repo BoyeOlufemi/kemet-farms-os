@@ -1,0 +1,150 @@
+{
+  "name": "Kemet Weather Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "value": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Hourly Weather Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [80, 120]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendBody": false,
+        "authentication": "headerAuth",
+        "options": {
+          "qs": {
+            "latitude": "7.6244",
+            "longitude": "4.7410",
+            "daily": "temperature_2m_max,temperature_2m_min,rain_sum,et0_fao_evapotranspiration,shortwave_radiation_sum",
+            "timezone": "Africa/Lagos"
+          },
+          "response": {
+            "responseFormat": "json"
+          }
+        }
+      },
+      "id": "weather-request",
+      "name": "OpenWeatherMap Current",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [320, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.all()[0].json;\nconst daily = payload.daily || {};\nconst today = 0;\nconst rainMm = Array.isArray(daily.rain_sum) ? daily.rain_sum[today] || 0 : 0;\nconst tempMax = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max[today] : null;\nconst et0 = Array.isArray(daily.et0_fao_evapotranspiration) ? daily.et0_fao_evapotranspiration[today] || 0 : 0;\nconst solar = Array.isArray(daily.shortwave_radiation_sum) ? daily.shortwave_radiation_sum[today] || 0 : 0;\nconst triggerType = rainMm >= 10 ? 'heavy_rain' : (tempMax != null && tempMax > 35) ? 'heat_alert' : null;\nif (!triggerType) return [];\nreturn [{ json: { field_id: 'field-1', trigger_type: triggerType, payload: { rain_mm: rainMm, temp_max: tempMax, et0_mm: et0, solar_mj: solar, source: 'open-meteo' } } }];\n"
+      },
+      "id": "evaluate",
+      "name": "Evaluate Trigger",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 80]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "kemet_weather_triggers",
+        "columns": ["field_id", "trigger_type", "payload", "consumed"],
+        "values": ["={{ $json.field_id }}", "={{ $json.trigger_type }}", "={{ $json.payload }}", "false"]
+      },
+      "id": "save-trigger",
+      "name": "Save Trigger",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [800, 80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const type = $json.trigger_type;\nconst fieldId = $json.field_id;\nconst payload = $json.payload || {};\nconst message = type === 'heavy_rain'\n  ? '🌧 Rain alert for ' + fieldId + ': ' + payload.rain_mm + 'mm expected. Hold fertilizer and irrigation for 2 hours.'\n  : '🌡 Heat alert for ' + fieldId + ': temp above ' + payload.temp_max + 'C. Increase hydration checks.';\nreturn [{ json: { to: 'staff-field-primary', message } }];\n"
+      },
+      "id": "compose-alert",
+      "name": "Format Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 80]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "create",
+        "messagesToSend": 1,
+        "contentType": "text",
+        "text": "={{ $json.message }}",
+        "toPhoneNumber": "={{ $json.to }}",
+        "fromPhoneNumber": "+14155238886"
+      },
+      "id": "twilio-alert",
+      "name": "Send WhatsApp Alert",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1280, 80]
+    }
+  ],
+  "connections": {
+    "Hourly Weather Check": [
+      [
+        {
+          "node": "OpenWeatherMap Current",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "OpenWeatherMap Current": [
+      [
+        {
+          "node": "Evaluate Trigger",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Evaluate Trigger": [
+      [
+        {
+          "node": "Save Trigger",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Save Trigger": [
+      [
+        {
+          "node": "Format Alert Message",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ],
+    "Format Alert Message": [
+      [
+        {
+          "node": "Send WhatsApp Alert",
+          "type": "main",
+          "index": 0
+        }
+      ]
+    ]
+  },
+  "pinData": {},
+  "settings": {},
+  "versionId": "kemet-weather-v1",
+  "meta": {
+    "editorVersion": "1.x"
+  },
+  "id": "kemet-weather-trigger",
+  "tags": ["kemet", "farms", "weather"]
+}

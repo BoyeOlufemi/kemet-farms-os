@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "Field": {
+      "title": "Field",
+      "description": "Represents an agricultural field plot in Kemet Farms",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique field identifier" },
+        "name": { "type": "string", "maxLength": 100, "description": "Name of the field plot" },
+        "sizeHectares": { "type": "number", "description": "Size in hectares" },
+        "crop_type": { "type": "string", "enum": ["PALM", "SOYBEAN"], "description": "Crop category" },
+        "seedlingCount": { "type": "number", "description": "Number of seedlings planted" },
+        "soilMoisture": { "type": "number", "description": "Current soil moisture percentage" },
+        "currentTask": { "type": "string", "maxLength": 200, "description": "Active task or alert status" }
+      },
+      "required": ["id", "name", "sizeHectares", "crop_type", "soilMoisture"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Farm operator or supervisor staff profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique staff ID" },
+        "name": { "type": "string", "maxLength": 100, "description": "Full name of staff member" },
+        "phone": { "type": "string", "maxLength": 30, "description": "WhatsApp phone number" },
+        "role": { "type": "string", "maxLength": 100, "description": "Role designation" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Active SMS/WhatsApp status" }
+      },
+      "required": ["id", "name", "phone", "role", "status"]
+    },
+    "CropLog": {
+      "title": "CropLog",
+      "description": "Operation task log for crop management",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Log entry UUID" },
+        "field_id": { "type": "string", "description": "Target field ID" },
+        "crop_type": { "type": "string", "enum": ["PALM", "SOYBEAN"], "description": "Target crop" },
+        "action_type": { "type": "string", "maxLength": 200, "description": "Description of action" },
+        "action_status": { "type": "string", "enum": ["todo", "done", "conflict"], "description": "Status of task" },
+        "staff_id": { "type": "string", "description": "Assigned staff member ID" },
+        "weather_trigger_id": { "type": "string", "description": "Associated weather trigger ID if applicable" },
+        "notes": { "type": "string", "maxLength": 500, "description": "Field notes or observations" },
+        "recorded_at": { "type": "string", "description": "ISO timestamp when task was logged" },
+        "verified_at": { "type": "string", "description": "ISO timestamp when verified by supervisor" }
+      },
+      "required": ["id", "field_id", "crop_type", "action_type", "action_status", "staff_id", "recorded_at"]
+    },
+    "WhatsAppMessage": {
+      "title": "WhatsAppMessage",
+      "description": "Inbound and outbound WhatsApp communication record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Message UUID" },
+        "from_number": { "type": "string", "maxLength": 30, "description": "Sender phone number" },
+        "to_number": { "type": "string", "maxLength": 30, "description": "Recipient phone number" },
+        "direction": { "type": "string", "enum": ["inbound", "outbound"], "description": "Message flow direction" },
+        "body": { "type": "string", "maxLength": 1000, "description": "Message content" },
+        "crop_log_id": { "type": "string", "description": "Associated crop log ID if applicable" },
+        "created_at": { "type": "string", "description": "ISO timestamp of message" }
+      },
+      "required": ["id", "from_number", "to_number", "direction", "body", "created_at"]
+    },
+    "WeatherTrigger": {
+      "title": "WeatherTrigger",
+      "description": "Weather event telemetry trigger log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Trigger UUID" },
+        "field_id": { "type": "string", "description": "Affected field ID" },
+        "trigger_type": { "type": "string", "enum": ["RAIN", "HEAT", "NORMAL"], "description": "Type of weather event" },
+        "consumed": { "type": "boolean", "description": "Whether alert was processed" },
+        "created_at": { "type": "string", "description": "ISO timestamp of event" }
+      },
+      "required": ["id", "field_id", "trigger_type", "consumed", "created_at"]
+    }
+  },
+  "firestore": {
+    "/fields/{fieldId}": {
+      "schema": { "$ref": "#/entities/Field" },
+      "description": "Collection of farm field plots"
+    },
+    "/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Collection of farm staff members"
+    },
+    "/cropLogs/{logId}": {
+      "schema": { "$ref": "#/entities/CropLog" },
+      "description": "Collection of crop action logs"
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/WhatsAppMessage" },
+      "description": "Collection of WhatsApp simulation messages"
+    },
+    "/weatherTriggers/{triggerId}": {
+      "schema": { "$ref": "#/entities/WeatherTrigger" },
+      "description": "Collection of weather telemetry alerts"
+    }
+  }
+}

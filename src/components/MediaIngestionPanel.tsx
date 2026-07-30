@@ -3,7 +3,7 @@ import { MediaItem, KemetDB, LedgerEntry } from '../types';
 import { uploadFileToFirebaseStorage } from '../utils/storage';
 import { auth, db as firestoreDb } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
-import { ADMIN_USER_ID } from '../utils/firestoreDb';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 import { 
   Upload, 
   Sparkles, 
@@ -80,11 +80,10 @@ export default function MediaIngestionPanel({ db, onUpdateDb }: MediaIngestionPa
       const staffMember = db.staff.find(s => s.id === selectedStaffId);
       let scanData: any = {};
       try {
-        const scanRes = await fetch('/api/gemini/scan-media', {
+        const scanRes = await authenticatedFetch('/api/gemini/scan-media', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            imageUrl: firebaseUrl,
             base64Data,
             mimeType: selectedFile.type,
             mediaCategory
@@ -120,7 +119,7 @@ export default function MediaIngestionPanel({ db, onUpdateDb }: MediaIngestionPa
       const currentUser = auth.currentUser;
       const staffName = staffMember 
         ? staffMember.name 
-        : (currentUser?.displayName || currentUser?.email || 'Farm Operator');
+        : (currentUser?.displayName || 'Farm Operator');
 
       const storagePath = typeof uploadRes === 'object' ? uploadRes.fullPath : `${folder}/${selectedFile.name}`;
 
@@ -133,7 +132,6 @@ export default function MediaIngestionPanel({ db, onUpdateDb }: MediaIngestionPa
         storage_path: storagePath,
         uploaded_by: staffName,
         userId: currentUser?.uid,
-        userEmail: currentUser?.email || undefined,
         amount_spent: aiData.receipt?.amount || undefined,
         notes: aiData.summary || aiData.plantHealth?.diagnosis || 'Uploaded via Firebase Storage & scanned with Gemini AI',
         created_at: new Date().toISOString()
@@ -199,30 +197,13 @@ export default function MediaIngestionPanel({ db, onUpdateDb }: MediaIngestionPa
   };
 
   const currentUser = auth.currentUser;
-  const isAdmin = currentUser?.uid === ADMIN_USER_ID || currentUser?.email === 'admin@kemetfarms.org';
-
   const filteredMedia = db.mediaItems.filter(item => {
     // 1. Category Filter
     if (activeFilter !== 'all' && item.category !== activeFilter) {
       return false;
     }
 
-    // 2. User Privacy / Role Filter: Test Users / Non-admin users MUST NOT see Admin files
-    if (!isAdmin) {
-      const isAdminFile = 
-        item.userId === ADMIN_USER_ID || 
-        item.userEmail === 'admin@kemetfarms.org' ||
-        (item.uploaded_by && (
-          item.uploaded_by.toLowerCase().includes('admin') || 
-          item.uploaded_by.includes(ADMIN_USER_ID)
-        ));
-
-      if (isAdminFile) {
-        return false;
-      }
-    }
-
-    return true;
+    return Boolean(currentUser && item.userId === currentUser.uid);
   });
 
   return (

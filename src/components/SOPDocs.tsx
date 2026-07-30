@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Markdown from 'react-markdown';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 import { 
   BookOpen, 
   PhoneCall, 
@@ -419,7 +420,7 @@ Reply "done" upon field completion or "conflict" if blocked.`;
     const fieldObj = fields.find(f => f.id === selectedField);
 
     try {
-      const response = await fetch('/api/sop/consult', {
+      const response = await authenticatedFetch('/api/sop/consult', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1602,4 +1603,3 @@ function SmartphoneIcon({ size = 16, className = "" }: { size?: number, classNam
     </svg>
   );
 }
-

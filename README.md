@@ -1,16 +1,31 @@
 # Kemet Farms OS
 
-Prototype WhatsApp-driven field-ops system for palm and soybean crop management.
+Prototype field-operations simulator for turning low-bandwidth staff messages
+into traceable assignments, completion records, exceptions, and supervisor
+review.
 
 **Status:** prototype/demo-ready, not production-verified.
-**Production prerequisite:** pass the verification checklist in `Supabase/twilio_supabase_checklist.md` before live use.
+The repository does not demonstrate a live WhatsApp deployment or validated
+agronomic recommendations.
 
-## Stack
-- **Comms:** Twilio WhatsApp sandbox
-- **Backend/DB:** Supabase `ohxjkbpkonfbaalldqqw`
-- **Automation:** n8n workflows
-- **Weather:** Open-Meteo (`Africa/Lagos`, Ilesha coordinates)
-- **Ops docs:** voice / SOPs in `Voice/`
+## Problem and value
+
+Field assignments are frequently coordinated through calls and chat messages,
+which makes ownership, completion, and exceptions difficult to audit. Kemet
+Farms OS demonstrates a workflow that structures those interactions and keeps
+the operational state visible to supervisors.
+
+## Implemented demo architecture
+
+- React and TypeScript operations interface
+- Firebase Authentication, Firestore, and Storage integration
+- Local browser storage for offline/demo state
+- Express endpoints for AI-assisted drafts and analysis
+- WhatsApp, Supabase, and n8n artifacts that remain pre-production designs
+
+AI endpoints fail closed: if analysis is unavailable, the API returns
+`AI_REVIEW_REQUIRED` and does not fabricate agronomic advice, receipt values, or
+task completion.
 
 ## Repo Layout
 | Folder/File | Purpose | Notes |
@@ -26,12 +41,33 @@ Prototype WhatsApp-driven field-ops system for palm and soybean crop management.
 | `.gitignore` | Ensures no screenshots, videos, build scripts, secrets are committed | Commit |
 
 ## Quickstart
-1. Apply schema in `Supabase/kemet_crop_logs_schema.sql` to Supabase project `ohxjkbpkonfbaalldqqw`
-2. Join Twilio WhatsApp sandbox from staff number
-3. Import workflows from `Workflows/` into local n8n
-4. Run verification checklist in `Supabase/twilio_supabase_checklist.md`
+
+```bash
+npm install
+npm run dev
+```
+
+Set `GEMINI_API_KEY` only for local AI endpoint testing. Firebase client
+configuration is not a substitute for Firestore authorization rules.
 
 ## Security
-- Do not commit database passwords or connection credentials
-- Do not commit Twilio Account SID / Auth Token
-- Do not commit Supabase service-role key
+
+- Firestore operational collections require an authenticated user.
+- Administrator access must be assigned through Firebase custom claims.
+- Do not commit database, Firebase Admin, Twilio, or Supabase credentials.
+- The current authenticated-user rule is a prototype baseline. Production use
+  requires farm-scoped membership and operator/supervisor roles.
+- AI-generated content requires human review and an approved, versioned farm
+  SOP before field dispatch.
+
+## Production readiness
+
+Before live use, select one authoritative data store, implement authenticated
+server APIs and provider webhooks, add role-based authorization, replace
+browser-only synchronization with durable event processing, and complete the
+verification checklist in `Supabase/twilio_supabase_checklist.md`.
+
+The production bundle currently builds, but the legacy TypeScript model has
+known type errors and does not yet pass `tsc --noEmit`. Treat type-system
+remediation and automated tests as required engineering work, not completed
+validation.

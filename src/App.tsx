@@ -35,7 +35,7 @@ import {
   Layers
 } from 'lucide-react';
 import { loadDatabase, saveDatabase, handleInboundWhatsApp, assignDailyTask, triggerWeatherAlert } from './utils/mockDb';
-import { initializeFirestoreData, syncDatabaseToFirestore, reconcileDatabaseWithFirestore, verifyFirestoreSync, syncUserProfileToFirestore, ADMIN_USER_ID } from './utils/firestoreDb';
+import { getAuthorizationClaims, initializeFirestoreData, syncDatabaseToFirestore, reconcileDatabaseWithFirestore, verifyFirestoreSync, syncUserProfileToFirestore } from './utils/firestoreDb';
 import { CropLog, Field, StaffMember, WhatsAppMessage } from './types';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { auth } from './lib/firebase';
@@ -70,6 +70,7 @@ export default function App() {
   const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAdminUser, setIsAdminUser] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
 
@@ -79,9 +80,13 @@ export default function App() {
       setCurrentUser(user);
       if (user) {
         await syncUserProfileToFirestore(user);
-        if (user.uid === ADMIN_USER_ID) {
+        const { isAdmin } = await getAuthorizationClaims(user);
+        setIsAdminUser(isAdmin);
+        if (isAdmin) {
           setActiveView('admin');
         }
+      } else {
+        setIsAdminUser(false);
       }
     });
     return () => unsubscribe();
@@ -198,8 +203,6 @@ export default function App() {
   };
 
   // Nav definitions
-  const isAdminUser = currentUser?.uid === ADMIN_USER_ID;
-
   const primaryNavigationItems = [
     ...(isAdminUser ? [{ id: 'admin', label: 'Admin View', icon: ShieldCheck, badge: 'ADMIN' }] : []),
     { id: 'dashboard', label: 'Operations Dashboard', icon: Tractor },

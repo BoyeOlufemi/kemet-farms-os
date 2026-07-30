@@ -7,14 +7,36 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && request.auth.uid == 'bH6Aen6uitQJEMgaKUspa2ZMnpv1';
+      return isSignedIn() && request.auth.token.admin == true;
     }
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Global Admin Grant: Admin user 'bH6Aen6uitQJEMgaKUspa2ZMnpv1' has full access across all paths
+    function hasFarmClaim() {
+      return isSignedIn()
+        && request.auth.token.farmId is string
+        && request.auth.token.farmId.size() > 0;
+    }
+
+    function canReadFarm(data) {
+      return hasFarmClaim()
+        && data.farmId is string
+        && data.farmId == request.auth.token.farmId;
+    }
+
+    function canCreateFarm(data) {
+      return canReadFarm(data);
+    }
+
+    function canUpdateFarm() {
+      return canReadFarm(resource.data)
+        && canReadFarm(request.resource.data)
+        && request.resource.data.farmId == resource.data.farmId;
+    }
+
+    // Administrators are assigned through Firebase custom claims, never source code.
     match /{document=**} {
       allow read, write: if isAdmin();
     }
@@ -24,41 +46,73 @@ service cloud.firestore {
       allow read, write: if isOwner(userId) || isAdmin();
     }
 
-    // Media items collection: Signed-in users can read/create/update files; owners and admins can delete
+    // Media records remain private to authenticated application operators.
     match /mediaItems/{mediaId} {
-      allow read, create, update: if isSignedIn() || true;
-      allow delete: if (isSignedIn() && (resource == null || resource.data.userId == request.auth.uid)) || isAdmin();
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data)
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if canUpdateFarm()
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAdmin()
+        || (canReadFarm(resource.data) && resource.data.userId == request.auth.uid);
     }
 
-    // Operational collections accessible to application operators
+    // Prototype baseline: operational records require authentication.
+    // Production must replace this with farm-scoped role and membership checks.
     match /fields/{fieldId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
 
     match /staff/{staffId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
 
     match /cropLogs/{logId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
 
     match /messages/{messageId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
 
     match /weatherTriggers/{triggerId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
 
     match /ledgerEntries/{entryId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
 
     match /maintenanceItems/{itemId} {
-      allow read, write: if true;
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
+    }
+
+    match /dispatchFeedbacks/{feedbackId} {
+      allow read: if canReadFarm(resource.data);
+      allow create: if canCreateFarm(request.resource.data);
+      allow update: if canUpdateFarm();
+      allow delete: if isAdmin();
     }
   }
 }
-
-

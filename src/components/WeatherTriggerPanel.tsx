@@ -53,26 +53,9 @@ export default function WeatherTriggerPanel({
         setForecast(formatted);
         setApiError(null);
       } catch (err: any) {
-        console.warn('Open-Meteo fetch failed, using fallback simulated telemetry', err);
-        setApiError('API Rate Limit/Offline — displaying fallback Nigeria forecast model.');
-        
-        // Highly realistic simulated fallback data matching Ilesha climatology
-        const mockDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const formatted = mockDays.map((day, idx) => {
-          const rain = idx === 2 ? 15 : idx === 5 ? 8 : 0; // rain on Wed and Sat
-          const et0 = 3.8 + Math.random() * 1.5;
-          const balance = rain - et0;
-          return {
-            date: `${day}, ${18 + idx} Jul`,
-            tempMax: 30 + Math.floor(Math.random() * 7),
-            tempMin: 22 + Math.floor(Math.random() * 3),
-            rainSum: rain,
-            et0Evap: parseFloat(et0.toFixed(2)),
-            waterBalance: parseFloat(balance.toFixed(2)),
-            radiation: 18 + Math.random() * 6
-          };
-        });
-        setForecast(formatted);
+        console.warn('Open-Meteo fetch failed; no forecast will be displayed', err);
+        setForecast([]);
+        setApiError('Live weather unavailable — no forecast or operational trigger was generated.');
       } finally {
         setLoading(false);
       }
@@ -83,17 +66,17 @@ export default function WeatherTriggerPanel({
   const handleRainTrigger = (e: React.FormEvent) => {
     e.preventDefault();
     onTriggerAlert(selectedField, 'RAIN', rainAmount);
-    alert(`🌧️ n8n Prediction: Expecting ${rainAmount}mm rain. Outbound WhatsApp alerts dispatched to staff!`);
+    alert(`🌧️ Simulation recorded for ${rainAmount}mm rain. No external WhatsApp message was sent.`);
   };
 
   const handleHeatTrigger = (e: React.FormEvent) => {
     e.preventDefault();
     onTriggerAlert(selectedField, 'HEAT', heatTemp);
-    alert(`🌡️ n8n Prediction: Solar temperature spike of ${heatTemp}°C. Outbound WhatsApp alerts dispatched to staff!`);
+    alert(`🌡️ Simulation recorded for a ${heatTemp}°C heat event. No external WhatsApp message was sent.`);
   };
 
   // Find active weather logs or alerts
-  const todayForecast = forecast[0] || { tempMax: 33, rainSum: 0, waterBalance: -4.5 };
+  const todayForecast = forecast[0] ?? null;
 
   return (
     <div className="space-y-6" id="weather_trigger_panel">
@@ -126,6 +109,14 @@ export default function WeatherTriggerPanel({
           <div className="h-48 flex items-center justify-center space-x-2 text-gray-400">
             <RefreshCw className="animate-spin text-emerald-500" size={20} />
             <span className="text-xs font-medium">Fetching real-time climatology charts...</span>
+          </div>
+        ) : !todayForecast ? (
+          <div className="h-48 flex items-center justify-center text-center text-amber-700 bg-amber-50 rounded-2xl border border-amber-100 p-6">
+            <div>
+              <AlertCircle className="mx-auto mb-2" size={24} />
+              <p className="text-sm font-semibold">Live weather data is unavailable.</p>
+              <p className="text-xs mt-1">No forecast, water-balance calculation, or operational trigger was generated.</p>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

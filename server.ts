@@ -2,13 +2,54 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  if (getApps().length === 0) {
+    initializeApp({ credential: applicationDefault() });
+  }
 
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ limit: "256kb", extended: true }));
+
+  const aiUnavailable = (res: express.Response, capability: string) =>
+    res.status(503).json({
+      success: false,
+      code: "AI_REVIEW_REQUIRED",
+      requiresReview: true,
+      capability,
+      error: "AI analysis is unavailable. No operational recommendation was generated.",
+    });
+
+  const rateLimits = new Map<string, { count: number; resetAt: number }>();
+  const authenticateApi: express.RequestHandler = async (req, res, next) => {
+    const authorization = req.header("Authorization");
+    if (!authorization?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authentication required." });
+    }
+    try {
+      const decoded = await getAuth().verifyIdToken(authorization.slice(7), true);
+      res.locals.user = decoded;
+      const now = Date.now();
+      const current = rateLimits.get(decoded.uid);
+      if (!current || now >= current.resetAt) {
+        rateLimits.set(decoded.uid, { count: 1, resetAt: now + 60_000 });
+      } else if (current.count >= 20) {
+        return res.status(429).json({ error: "AI request limit exceeded." });
+      } else {
+        current.count += 1;
+      }
+      return next();
+    } catch {
+      return res.status(401).json({ error: "Invalid or expired authentication token." });
+    }
+  };
+
+  app.use("/api/sop", authenticateApi);
+  app.use("/api/gemini", authenticateApi);
 
   // API Route: Health Check
   app.get("/api/health", (_req, res) => {
@@ -25,35 +66,10 @@ async function startServer() {
       });
     }
 
-    const fallbackSop = `### Standard Operating Procedure (Organic Field Protocol)
-**Target:** ${cropType || 'General Dual-Crop'} | **Field:** ${fieldName || 'All Sectors'}
-**Category:** ${scenario || 'Agronomic Task'}
-
-#### Executive Operations Checklist:
-1. **Pre-Execution Safety & Tooling Inspection:**
-   - Verify non-chemical protective gear (breathable gloves, boots, eye protection).
-   - Calibrate hand sprayers and clean drip emitters using organic vinegar solution.
-2. **Organic Material & Dosing Specifications:**
-   - Apply 3.5 Liters/tree (Oil Palm Seedlings) or 150 kg/Ha (Soybeans) of certified thermophilic compost (30:1 C:N ratio).
-   - Bio-pesticide spray: 5% aqueous neem oil extract mixed with organic emulsifier.
-3. **Execution Steps:**
-   - Ring clearance: Clear 1.5m radius around seedling bases free from competitive weeds.
-   - Soil moisture check: Maintain 45-60% moisture range before fertigation.
-4. **Verification & Logging:**
-   - Supervisor verifies completion on Kemet Farms OS mobile portal.
-   - Record exact volume applied and field hand initials.`;
-
     try {
       const apiKey = process.env.GEMINI_API_KEY;
 
-      if (!apiKey) {
-        return res.json({
-          success: true,
-          sopText: fallbackSop,
-          fallback: true,
-          notice: "GEMINI_API_KEY not set. Provided local organic SOP guideline."
-        });
-      }
+      if (!apiKey) return aiUnavailable(res, "sop-consult");
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -88,7 +104,8 @@ Generate a structured, actionable, step-by-step organic SOP checklist.`;
         }
       });
 
-      const sopText = response.text || fallbackSop;
+      const sopText = response.text?.trim();
+      if (!sopText) return aiUnavailable(res, "sop-consult");
 
       return res.json({
         success: true,
@@ -100,13 +117,8 @@ Generate a structured, actionable, step-by-step organic SOP checklist.`;
         }
       });
     } catch (err: any) {
-      console.log("[AI SOP Generator] Using local organic SOP guideline fallback.");
-      return res.json({
-        success: true,
-        sopText: fallbackSop,
-        fallback: true,
-        notice: "AI service rate-limited or quota exceeded. Returned offline organic SOP checklist."
-      });
+      console.error("[AI SOP Generator] Analysis unavailable:", err);
+      return aiUnavailable(res, "sop-consult");
     }
   });
 
@@ -114,58 +126,10 @@ Generate a structured, actionable, step-by-step organic SOP checklist.`;
   app.post("/api/gemini/advisor", async (req, res) => {
     const { fields } = req.body;
 
-    const generateFallbackAdvice = () => {
-      const fieldList = Array.isArray(fields) ? fields : [];
-      const lowMoistureFields = fieldList.filter((f: any) => (f.soilMoisture || 0) < 40);
-
-      if (lowMoistureFields.length > 0) {
-        return {
-          healthStatus: "ATTENTION_REQUIRED",
-          summary: `Soil moisture levels in ${lowMoistureFields.map((f: any) => f.name).join(', ')} require irrigation intervention.`,
-          recommendations: [
-            {
-              priority: "HIGH",
-              targetField: lowMoistureFields[0]?.name || "Field A",
-              action: "Schedule 45-Min Target Drip Irrigation",
-              rationale: `Moisture is below optimal 45% threshold. Replenishing root zone moisture supports seedling vigor.`,
-              suggestedSop: "SOP-IRR-02"
-            },
-            {
-              priority: "MEDIUM",
-              targetField: lowMoistureFields[0]?.name || "Field A",
-              action: "Organic Neem Extract Soil Application",
-              rationale: "Prevents root-knot nematodes during moisture recovery phase.",
-              suggestedSop: "SOP-PEST-01"
-            }
-          ]
-        };
-      }
-
-      return {
-        healthStatus: "OPTIMAL",
-        summary: "Field sensor telemetry indicates balanced moisture, ambient temperature, and soil EC parameters across all sectors.",
-        recommendations: [
-          {
-            priority: "LOW",
-            targetField: "Sector Overview",
-            action: "Routine Seedling Canopy Inspection",
-            rationale: "Bi-weekly visual inspection maintains growth logging integrity ahead of seasonal rains.",
-            suggestedSop: "SOP-INSP-01"
-          }
-        ]
-      };
-    };
-
     try {
       const apiKey = process.env.GEMINI_API_KEY;
 
-      if (!apiKey) {
-        return res.json({
-          success: true,
-          advice: generateFallbackAdvice(),
-          fallback: true
-        });
-      }
+      if (!apiKey) return aiUnavailable(res, "field-advisor");
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -213,17 +177,13 @@ Provide structured agronomic advice.`;
       try {
         parsed = JSON.parse(response.text || '{}');
       } catch (e) {
-        parsed = generateFallbackAdvice();
+        return aiUnavailable(res, "field-advisor");
       }
 
       return res.json({ success: true, advice: parsed });
     } catch (err: any) {
-      console.log("[AI Advisor] Serving offline field diagnostic advice.");
-      return res.json({
-        success: true,
-        advice: generateFallbackAdvice(),
-        fallback: true
-      });
+      console.error("[AI Advisor] Analysis unavailable:", err);
+      return aiUnavailable(res, "field-advisor");
     }
   });
 
@@ -235,20 +195,10 @@ Provide structured agronomic advice.`;
       return res.status(400).json({ error: "userQuery is required." });
     }
 
-    const fallbackReply = `Field Agronomic Response for "${userQuery}":\n\n1. **Telemetry Assessment**: Current soil moisture across active fields averages ${
-      fields && fields[0] ? fields[0].soilMoisture : 45
-    }%. Organic fertigation cycle is operating on schedule.\n2. **Recommended Action**: Follow standard organic SOPs for weed clearance and neem oil application.\n3. **Safety Notice**: Inspect drip irrigation nozzles after heavy rainfall events to prevent silt clogging.`;
-
     try {
       const apiKey = process.env.GEMINI_API_KEY;
 
-      if (!apiKey) {
-        return res.json({
-          success: true,
-          replyText: fallbackReply,
-          fallback: true
-        });
-      }
+      if (!apiKey) return aiUnavailable(res, "crop-chat");
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -283,17 +233,12 @@ Provide concise real-time agronomic advice.`;
         }
       });
 
-      return res.json({
-        success: true,
-        replyText: response.text || fallbackReply
-      });
+      const replyText = response.text?.trim();
+      if (!replyText) return aiUnavailable(res, "crop-chat");
+      return res.json({ success: true, replyText });
     } catch (err: any) {
-      console.log("[AI Crop Chat] Serving offline agronomist response.");
-      return res.json({
-        success: true,
-        replyText: fallbackReply,
-        fallback: true
-      });
+      console.error("[AI Crop Chat] Analysis unavailable:", err);
+      return aiUnavailable(res, "crop-chat");
     }
   });
 
@@ -305,18 +250,10 @@ Provide concise real-time agronomic advice.`;
       return res.status(400).json({ error: "userQuery is required." });
     }
 
-    const fallbackReply = `[Kemet Farms OS Alert] Hello ${staffName || 'Operator'} (${role || 'Field Staff'}): Regarding "${userQuery}" - Please verify drip irrigation valves and log completion in your daily supervisor checklist. Reply DONE when executed.`;
-
     try {
       const apiKey = process.env.GEMINI_API_KEY;
 
-      if (!apiKey) {
-        return res.json({
-          success: true,
-          replyText: fallbackReply,
-          fallback: true
-        });
-      }
+      if (!apiKey) return aiUnavailable(res, "message-draft");
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -345,89 +282,38 @@ Provide a concise WhatsApp field response.`;
         }
       });
 
-      return res.json({
-        success: true,
-        replyText: response.text || fallbackReply
-      });
+      const replyText = response.text?.trim();
+      if (!replyText) return aiUnavailable(res, "message-draft");
+      return res.json({ success: true, replyText });
     } catch (err: any) {
-      console.log("[AI Assistant] Serving offline WhatsApp response.");
-      return res.json({
-        success: true,
-        replyText: fallbackReply,
-        fallback: true
-      });
+      console.error("[AI Assistant] Draft unavailable:", err);
+      return aiUnavailable(res, "message-draft");
     }
   });
 
   // API Route: Gemini AI Vision Media & Receipt Scanner
   app.post("/api/gemini/scan-media", async (req, res) => {
-    const { imageUrl, base64Data: rawBase64, mimeType: userMimeType, mediaCategory } = req.body;
-
-    const generateFallbackVisionData = () => {
-      const cat = mediaCategory || 'receipt';
-      if (cat === 'receipt') {
-        return {
-          detectedCategory: "receipt",
-          summary: "Parsed agricultural supply receipt item.",
-          receipt: {
-            itemName: "Organic Fertilizer & Drip Line Accessories",
-            amount: 35000,
-            currency: "NGN",
-            date: new Date().toISOString().split('T')[0],
-            category: "Chemicals/Fertilizer",
-            supplier: "Kemet Farm Supply Depot",
-            confidence: 90
-          }
-        };
-      } else if (cat === 'plant_health') {
-        return {
-          detectedCategory: "plant_health",
-          summary: "Seedling canopy photograph showing healthy leaf pigmentation.",
-          plantHealth: {
-            cropType: "PALM",
-            status: "OPTIMAL",
-            diagnosis: "Good chlorophyll density and leaf turgor pressure observed.",
-            recommendedAction: "Maintain current 45-minute organic fertigation cycle.",
-            severity: "LOW"
-          }
-        };
-      }
-      return {
-        detectedCategory: "general",
-        summary: "Farm operations media uploaded and logged to Firebase Storage.",
-        taskUpdate: {
-          taskTitle: "Field Inspection Photo",
-          completionStatus: "VERIFIED_DONE",
-          notes: "Logged successfully to field registry."
-        }
-      };
-    };
+    const { base64Data: rawBase64, mimeType: userMimeType, mediaCategory } = req.body;
 
     try {
       const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        return res.json({
-          success: true,
-          data: generateFallbackVisionData(),
-          fallback: true
-        });
+      if (!apiKey) return aiUnavailable(res, "media-scan");
+
+      const base64String = typeof rawBase64 === "string" ? rawBase64 : "";
+      const detectedMime = typeof userMimeType === "string" ? userMimeType : "";
+      const allowedMimes = new Set(["image/jpeg", "image/png", "image/webp"]);
+      if (!base64String) {
+        return res.status(400).json({ error: "Inline image data is required." });
       }
-
-      let base64String = rawBase64 || "";
-      let detectedMime = userMimeType || "image/jpeg";
-
-      if (!base64String && imageUrl && (imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
-        try {
-          const imgRes = await fetch(imageUrl);
-          if (imgRes.ok) {
-            const contentType = imgRes.headers.get("content-type");
-            if (contentType) detectedMime = contentType.split(";")[0];
-            const arrayBuf = await imgRes.arrayBuffer();
-            base64String = Buffer.from(arrayBuf).toString("base64");
-          }
-        } catch (fetchErr) {
-          console.warn("Could not fetch remote image for Gemini vision analysis:", fetchErr);
-        }
+      if (!allowedMimes.has(detectedMime)) {
+        return res.status(415).json({ error: "Only JPEG, PNG, and WebP images are supported." });
+      }
+      const cleanBase64 = base64String.replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanBase64)) {
+        return res.status(400).json({ error: "Invalid base64 image data." });
+      }
+      if (Buffer.byteLength(cleanBase64, "base64") > 1_500_000) {
+        return res.status(413).json({ error: "Image exceeds the 1.5 MB analysis limit." });
       }
 
       const ai = new GoogleGenAI({
@@ -471,9 +357,7 @@ Analyze the image carefully and output a JSON object with this EXACT structure:
 
       let responseText = "";
 
-      if (base64String) {
-        const cleanBase64 = base64String.replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
-        
+      {
         const imagePart = {
           inlineData: {
             mimeType: detectedMime,
@@ -491,22 +375,13 @@ Analyze the image carefully and output a JSON object with this EXACT structure:
           }
         });
         responseText = response.text || "{}";
-      } else {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: promptText + `\nImage URL reference: ${imageUrl || 'No image data attached'}`,
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
-        responseText = response.text || "{}";
       }
 
       let parsedData = {};
       try {
         parsedData = JSON.parse(responseText);
       } catch (e) {
-        parsedData = generateFallbackVisionData();
+        return aiUnavailable(res, "media-scan");
       }
 
       return res.json({
@@ -515,12 +390,8 @@ Analyze the image carefully and output a JSON object with this EXACT structure:
       });
 
     } catch (err: any) {
-      console.log("[AI Vision Scan] Serving offline vision scan data.");
-      return res.json({
-        success: true,
-        data: generateFallbackVisionData(),
-        fallback: true
-      });
+      console.error("[AI Vision Scan] Analysis unavailable:", err);
+      return aiUnavailable(res, "media-scan");
     }
   });
 

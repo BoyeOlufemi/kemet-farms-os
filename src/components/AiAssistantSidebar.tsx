@@ -21,6 +21,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { Field, CropLog, StaffMember } from '../types';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 interface AiAssistantSidebarProps {
   isOpen: boolean;
@@ -74,7 +75,7 @@ export default function AiAssistantSidebar({
     {
       id: 'welcome',
       sender: 'ai',
-      text: "Hello! I am your **Gemini AI Agronomist**. I monitor live telemetry across all Kemet fields in real time. Ask me anything about soil moisture, crop stage optimization, or irrigation SOPs!",
+      text: "Hello! I can assist with reviewing Kemet field data when the AI service is available. Treat every result as decision support requiring human verification before operational use.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -92,7 +93,7 @@ export default function AiAssistantSidebar({
   const fetchRealtimeAdvice = async () => {
     setLoadingAdvice(true);
     try {
-      const res = await fetch('/api/gemini/advisor', {
+      const res = await authenticatedFetch('/api/gemini/advisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields, cropLogs })
@@ -107,56 +108,21 @@ export default function AiAssistantSidebar({
       if (data.success && data.advice) {
         setAdvice(data.advice);
       } else {
-        generateFallbackAdvice();
+        setUnavailableAdvice();
       }
     } catch (e) {
-      generateFallbackAdvice();
+      setUnavailableAdvice();
     } finally {
       setLoadingAdvice(false);
     }
   };
 
-  // Generate deterministic fallback advice based on real field values if API is unavailable
-  const generateFallbackAdvice = () => {
-    const lowMoistureFields = fields.filter(f => f.soilMoisture < 40);
-    const highHeatFields = fields.filter(f => f.soilMoisture < 30 || f.status === 'ATTENTION_REQUIRED');
-
-    if (lowMoistureFields.length > 0) {
-      setAdvice({
-        healthStatus: 'ATTENTION_REQUIRED',
-        summary: `Soil moisture dropped below threshold in ${lowMoistureFields.map(f => f.name).join(', ')}. Immediate drip irrigation scheduled.`,
-        recommendations: [
-          {
-            priority: 'HIGH',
-            targetField: lowMoistureFields[0].name,
-            action: 'Execute 45-Min Emergency Drip Irrigation',
-            rationale: `Current moisture is ${lowMoistureFields[0].soilMoisture}%, which is below the 40% optimal baseline for ${lowMoistureFields[0].crop_type}.`,
-            suggestedSop: 'SOP-IRR-02'
-          },
-          {
-            priority: 'MEDIUM',
-            targetField: fields[0]?.name || 'All Fields',
-            action: 'Soil Nutrient & EC Verification',
-            rationale: 'Post-irrigation electrical conductivity check ensures balanced fertigation absorption.',
-            suggestedSop: 'SOP-FERT-01'
-          }
-        ]
-      });
-    } else {
-      setAdvice({
-        healthStatus: 'OPTIMAL',
-        summary: 'All field telemetry levels (moisture, temperature, canopy growth) are within target agronomical ranges.',
-        recommendations: [
-          {
-            priority: 'LOW',
-            targetField: 'Field A (Oil Palm)',
-            action: 'Routine Nursery Canopy Moisture Log',
-            rationale: 'Routine bi-weekly seedling inspection to maintain root vigor ahead of seasonal rainfall.',
-            suggestedSop: 'SOP-INSP-01'
-          }
-        ]
-      });
-    }
+  const setUnavailableAdvice = () => {
+    setAdvice({
+      healthStatus: 'ATTENTION_REQUIRED',
+      summary: 'AI review is unavailable. No operational recommendation was generated.',
+      recommendations: []
+    });
   };
 
   useEffect(() => {
@@ -182,7 +148,7 @@ export default function AiAssistantSidebar({
     setIsSending(true);
 
     try {
-      const res = await fetch('/api/gemini/crop-chat', {
+      const res = await authenticatedFetch('/api/gemini/crop-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -203,7 +169,7 @@ export default function AiAssistantSidebar({
       if (data.success && data.replyText) {
         reply = data.replyText;
       } else {
-        reply = getFallbackChatReply(textToSend);
+        reply = getUnavailableChatReply();
       }
 
       const aiMsg: ChatMessage = {
@@ -218,7 +184,7 @@ export default function AiAssistantSidebar({
       const aiMsg: ChatMessage = {
         id: crypto.randomUUID(),
         sender: 'ai',
-        text: getFallbackChatReply(textToSend),
+        text: getUnavailableChatReply(),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiMsg]);
@@ -227,17 +193,8 @@ export default function AiAssistantSidebar({
     }
   };
 
-  const getFallbackChatReply = (query: string): string => {
-    const q = query.toLowerCase();
-    if (q.includes('moisture') || q.includes('irrigation') || q.includes('water')) {
-      const fieldList = fields.map(f => `• **${f.name}** (${f.crop_type}): Moisture ${f.soilMoisture}% [${f.soilMoisture < 40 ? 'Action Needed' : 'Normal'}]`).join('\n');
-      return `Based on live telemetry:\n${fieldList}\n\n**Agronomic Advice:** Keep Oil Palm seedlings around 45–60% moisture. If moisture drops below 35%, execute 45-minute drip cycles via SOP-IRR-02.`;
-    }
-    if (q.includes('yield') || q.includes('rain') || q.includes('weather')) {
-      return `**Precipitation vs Yield Insights:**\n• Current rainfall correlation coefficient is **+0.91** (Strong Positive).\n• Optimal precipitation window: **180–280 mm/month** yields max ~3.2 Tons/Ha for soybean and palm oil blocks.\n• Ensure drainage channels in Field B are clear during peak downpours.`;
-    }
-    return `**Agronomist Response:** I have analyzed your telemetry. All active fields (${fields.length} blocks) are monitored. Keep regular logs updated via the WhatsApp Bot or Pre-flight Checklist for maximum predictive accuracy.`;
-  };
+  const getUnavailableChatReply = (): string =>
+    '**AI review unavailable.** No agronomic or operational recommendation was generated. Verify field conditions and use an approved SOP with human review.';
 
   const quickPrompts = [
     "⚡ Analyze field moisture levels",
@@ -282,9 +239,9 @@ export default function AiAssistantSidebar({
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="font-bold text-sm font-display text-white tracking-wide">Gemini AI Agronomist</h3>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono font-bold px-1.5 py-0.5 rounded border border-emerald-500/30">LIVE</span>
+                    <span className="text-[9px] bg-amber-500/20 text-amber-300 font-mono font-bold px-1.5 py-0.5 rounded border border-amber-500/30">REVIEW REQUIRED</span>
                   </div>
-                  <p className="text-3xs text-slate-400 font-mono">Real-Time Crop Telemetry & Management</p>
+                  <p className="text-3xs text-slate-400 font-mono">AI-assisted review; verify source data and recommendations</p>
                 </div>
               </div>
 

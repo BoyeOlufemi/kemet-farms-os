@@ -8,7 +8,7 @@ import {
   User 
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { syncUserProfileToFirestore, ADMIN_USER_ID } from '../utils/firestoreDb';
+import { syncUserProfileToFirestore } from '../utils/firestoreDb';
 import { LogIn, UserPlus, LogOut, ShieldCheck, Mail, Lock, User as UserIcon, X, CheckCircle2, AlertCircle, Sparkles, Shield } from 'lucide-react';
 
 interface AuthModalProps {
@@ -70,16 +70,14 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
           await updateProfile(userCred.user, { displayName: fullName.trim() });
         }
         await syncUserProfileToFirestore(userCred.user);
-        const isAdmin = userCred.user.uid === ADMIN_USER_ID;
-        setSuccessMessage(`Account created successfully! ${isAdmin ? 'Admin Dashboard Access Granted.' : `Welcome, ${fullName.trim() || userCred.user.email}`}`);
+        setSuccessMessage(`Account created successfully! Welcome, ${fullName.trim() || userCred.user.email}`);
         setTimeout(() => {
           onClose();
         }, 1500);
       } else {
         const userCred = await signInWithEmailAndPassword(auth, email.trim(), password);
         await syncUserProfileToFirestore(userCred.user);
-        const isAdmin = userCred.user.uid === ADMIN_USER_ID;
-        setSuccessMessage(`Welcome back! ${isAdmin ? 'Administrator Access Granted (Admin Dashboard Ready).' : `Signed in as ${userCred.user.displayName || userCred.user.email}`}`);
+        setSuccessMessage(`Signed in as ${userCred.user.displayName || userCred.user.email}`);
         setTimeout(() => {
           onClose();
         }, 1500);
@@ -354,4 +352,3 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     </div>
   );
 }
-

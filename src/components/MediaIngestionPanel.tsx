@@ -119,7 +119,7 @@ export default function MediaIngestionPanel({ db, onUpdateDb }: MediaIngestionPa
       const currentUser = auth.currentUser;
       const staffName = staffMember 
         ? staffMember.name 
-        : (currentUser?.displayName || currentUser?.email || 'Farm Operator');
+        : (currentUser?.displayName || 'Farm Operator');
 
       const storagePath = typeof uploadRes === 'object' ? uploadRes.fullPath : `${folder}/${selectedFile.name}`;
 
@@ -132,7 +132,6 @@ export default function MediaIngestionPanel({ db, onUpdateDb }: MediaIngestionPa
         storage_path: storagePath,
         uploaded_by: staffName,
         userId: currentUser?.uid,
-        userEmail: currentUser?.email || undefined,
         amount_spent: aiData.receipt?.amount || undefined,
         notes: aiData.summary || aiData.plantHealth?.diagnosis || 'Uploaded via Firebase Storage & scanned with Gemini AI',
         created_at: new Date().toISOString()

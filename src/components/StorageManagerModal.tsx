@@ -340,8 +340,7 @@ export default function StorageManagerModal({ isOpen, onClose, onSelectUrl, db, 
         url: url,
         storage_path: fullPath,
         userId: currentUser?.uid,
-        userEmail: currentUser?.email || undefined,
-        uploaded_by: currentUser?.displayName || currentUser?.email || 'Firebase Storage Upload',
+        uploaded_by: currentUser?.displayName || 'Firebase Storage Upload',
         notes: `Uploaded file to Firebase Storage`,
         created_at: new Date().toISOString()
       };

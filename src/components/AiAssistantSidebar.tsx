@@ -21,6 +21,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { Field, CropLog, StaffMember } from '../types';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 interface AiAssistantSidebarProps {
   isOpen: boolean;
@@ -92,7 +93,7 @@ export default function AiAssistantSidebar({
   const fetchRealtimeAdvice = async () => {
     setLoadingAdvice(true);
     try {
-      const res = await fetch('/api/gemini/advisor', {
+      const res = await authenticatedFetch('/api/gemini/advisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields, cropLogs })
@@ -182,7 +183,7 @@ export default function AiAssistantSidebar({
     setIsSending(true);
 
     try {
-      const res = await fetch('/api/gemini/crop-chat', {
+      const res = await authenticatedFetch('/api/gemini/crop-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

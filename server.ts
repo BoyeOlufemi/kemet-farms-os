@@ -2,10 +2,15 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  if (getApps().length === 0) {
+    initializeApp({ credential: applicationDefault() });
+  }
 
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ limit: "256kb", extended: true }));
@@ -18,6 +23,33 @@ async function startServer() {
       capability,
       error: "AI analysis is unavailable. No operational recommendation was generated.",
     });
+
+  const rateLimits = new Map<string, { count: number; resetAt: number }>();
+  const authenticateApi: express.RequestHandler = async (req, res, next) => {
+    const authorization = req.header("Authorization");
+    if (!authorization?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authentication required." });
+    }
+    try {
+      const decoded = await getAuth().verifyIdToken(authorization.slice(7), true);
+      res.locals.user = decoded;
+      const now = Date.now();
+      const current = rateLimits.get(decoded.uid);
+      if (!current || now >= current.resetAt) {
+        rateLimits.set(decoded.uid, { count: 1, resetAt: now + 60_000 });
+      } else if (current.count >= 20) {
+        return res.status(429).json({ error: "AI request limit exceeded." });
+      } else {
+        current.count += 1;
+      }
+      return next();
+    } catch {
+      return res.status(401).json({ error: "Invalid or expired authentication token." });
+    }
+  };
+
+  app.use("/api/sop", authenticateApi);
+  app.use("/api/gemini", authenticateApi);
 
   // API Route: Health Check
   app.get("/api/health", (_req, res) => {
@@ -261,27 +293,27 @@ Provide a concise WhatsApp field response.`;
 
   // API Route: Gemini AI Vision Media & Receipt Scanner
   app.post("/api/gemini/scan-media", async (req, res) => {
-    const { imageUrl, base64Data: rawBase64, mimeType: userMimeType, mediaCategory } = req.body;
+    const { base64Data: rawBase64, mimeType: userMimeType, mediaCategory } = req.body;
 
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) return aiUnavailable(res, "media-scan");
 
-      let base64String = rawBase64 || "";
-      let detectedMime = userMimeType || "image/jpeg";
-
-      if (!base64String && imageUrl && (imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
-        try {
-          const imgRes = await fetch(imageUrl);
-          if (imgRes.ok) {
-            const contentType = imgRes.headers.get("content-type");
-            if (contentType) detectedMime = contentType.split(";")[0];
-            const arrayBuf = await imgRes.arrayBuffer();
-            base64String = Buffer.from(arrayBuf).toString("base64");
-          }
-        } catch (fetchErr) {
-          console.warn("Could not fetch remote image for Gemini vision analysis:", fetchErr);
-        }
+      const base64String = typeof rawBase64 === "string" ? rawBase64 : "";
+      const detectedMime = typeof userMimeType === "string" ? userMimeType : "";
+      const allowedMimes = new Set(["image/jpeg", "image/png", "image/webp"]);
+      if (!base64String) {
+        return res.status(400).json({ error: "Inline image data is required." });
+      }
+      if (!allowedMimes.has(detectedMime)) {
+        return res.status(415).json({ error: "Only JPEG, PNG, and WebP images are supported." });
+      }
+      const cleanBase64 = base64String.replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanBase64)) {
+        return res.status(400).json({ error: "Invalid base64 image data." });
+      }
+      if (Buffer.byteLength(cleanBase64, "base64") > 1_500_000) {
+        return res.status(413).json({ error: "Image exceeds the 1.5 MB analysis limit." });
       }
 
       const ai = new GoogleGenAI({
@@ -325,9 +357,7 @@ Analyze the image carefully and output a JSON object with this EXACT structure:
 
       let responseText = "";
 
-      if (base64String) {
-        const cleanBase64 = base64String.replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
-        
+      {
         const imagePart = {
           inlineData: {
             mimeType: detectedMime,
@@ -340,15 +370,6 @@ Analyze the image carefully and output a JSON object with this EXACT structure:
           contents: {
             parts: [imagePart, { text: promptText }]
           },
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
-        responseText = response.text || "{}";
-      } else {
-        const response = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: promptText + `\nImage URL reference: ${imageUrl || 'No image data attached'}`,
           config: {
             responseMimeType: "application/json"
           }

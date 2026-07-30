@@ -9,7 +9,7 @@ import {
 import { KemetDB, MediaItem } from '../types';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db as firestoreDb } from '../lib/firebase';
-import { ADMIN_USER_ID } from '../utils/firestoreDb';
+import { getAuthorizationClaims } from '../utils/firestoreDb';
 import { 
   Upload, 
   Folder, 
@@ -169,23 +169,23 @@ export default function StorageManagerModal({ isOpen, onClose, onSelectUrl, db, 
     setIsLoadingFiles(true);
     try {
       const currentUser = auth.currentUser;
-      const isAdmin = currentUser?.uid === ADMIN_USER_ID || currentUser?.email === 'admin@kemetfarms.org';
+      const { isAdmin } = currentUser
+        ? await getAuthorizationClaims(currentUser)
+        : { isAdmin: false };
+      const adminUserId = isAdmin ? currentUser?.uid : null;
 
       // Track Admin file URLs & paths to filter out for non-admin users
       const adminUrlsAndPaths = new Set<string>();
       if (activeDb) {
         activeDb.mediaItems?.forEach((m) => {
-          const isAdminFile = m.userId === ADMIN_USER_ID || 
-            m.userEmail === 'admin@kemetfarms.org' ||
-            (m.uploaded_by && (m.uploaded_by.toLowerCase().includes('admin') || m.uploaded_by.includes(ADMIN_USER_ID)));
+          const isAdminFile = Boolean(adminUserId && m.userId === adminUserId);
           if (isAdminFile) {
             if (m.url) adminUrlsAndPaths.add(m.url);
             if (m.storage_path) adminUrlsAndPaths.add(m.storage_path);
           }
         });
         activeDb.ledgerEntries?.forEach((l) => {
-          const isAdminEntry = (l as any).userId === ADMIN_USER_ID || 
-            (l as any).uploaded_by?.toLowerCase().includes('admin');
+          const isAdminEntry = Boolean(adminUserId && (l as any).userId === adminUserId);
           if (isAdminEntry && l.receipt_url) {
             adminUrlsAndPaths.add(l.receipt_url);
           }
@@ -219,9 +219,7 @@ export default function StorageManagerModal({ isOpen, onClose, onSelectUrl, db, 
       if (activeDb) {
         if (activeDb.mediaItems) {
           activeDb.mediaItems.forEach((m) => {
-            const isAdminFile = m.userId === ADMIN_USER_ID || 
-              m.userEmail === 'admin@kemetfarms.org' ||
-              (m.uploaded_by && (m.uploaded_by.toLowerCase().includes('admin') || m.uploaded_by.includes(ADMIN_USER_ID)));
+            const isAdminFile = Boolean(adminUserId && m.userId === adminUserId);
 
             if (!isAdmin && isAdminFile) {
               return; // Skip admin file for non-admin user
@@ -238,8 +236,7 @@ export default function StorageManagerModal({ isOpen, onClose, onSelectUrl, db, 
         }
         if (activeDb.ledgerEntries) {
           activeDb.ledgerEntries.forEach((l) => {
-            const isAdminEntry = (l as any).userId === ADMIN_USER_ID || 
-              (l as any).uploaded_by?.toLowerCase().includes('admin');
+            const isAdminEntry = Boolean(adminUserId && (l as any).userId === adminUserId);
 
             if (!isAdmin && isAdminEntry) {
               return;

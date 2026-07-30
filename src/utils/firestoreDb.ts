@@ -4,15 +4,30 @@ import {
   setDoc, 
   getDocs,
   getDoc,
-  getDocFromServer
+  getDocFromServer,
+  query,
+  where
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from './firebaseErrors';
 import { KemetDB } from './mockDb';
 import { Field, StaffMember, CropLog, WhatsAppMessage, WeatherTrigger, MediaItem, LedgerEntry, DispatchFeedback, MaintenanceItem, UserProfile } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 
-export const ADMIN_USER_ID = 'bH6Aen6uitQJEMgaKUspa2ZMnpv1';
+export async function getAuthorizationClaims(user: FirebaseUser) {
+  const token = await user.getIdTokenResult(true);
+  return {
+    isAdmin: token.claims.admin === true,
+    farmId: typeof token.claims.farmId === 'string' ? token.claims.farmId : null,
+  };
+}
+
+async function requireFarmId(): Promise<string> {
+  if (!auth.currentUser) throw new Error('Authentication is required.');
+  const { farmId } = await getAuthorizationClaims(auth.currentUser);
+  if (!farmId) throw new Error('The signed-in user has no farm membership claim.');
+  return farmId;
+}
 
 export interface SyncStatusReport {
   isSynced: boolean;
@@ -54,6 +69,7 @@ export async function initializeFirestoreData(currentDb: KemetDB): Promise<void>
   try {
     const isOnline = navigator.onLine;
     if (!isOnline) return;
+    const farmId = await requireFarmId();
 
     const collectionsToSeed = [
       { name: 'fields', items: currentDb.fields },
@@ -69,11 +85,11 @@ export async function initializeFirestoreData(currentDb: KemetDB): Promise<void>
 
     for (const col of collectionsToSeed) {
       try {
-        const snap = await getDocs(collection(db, col.name));
+        const snap = await getDocs(query(collection(db, col.name), where('farmId', '==', farmId)));
         if (snap.empty && col.items && col.items.length > 0) {
           for (const item of col.items as any[]) {
             if (item && item.id) {
-              await setDoc(doc(db, col.name, item.id), item);
+              await setDoc(doc(db, col.name, item.id), { ...item, farmId });
             }
           }
         }
@@ -93,10 +109,11 @@ export async function syncDatabaseToFirestore(dbData: KemetDB): Promise<{ succes
   }
 
   try {
+    const farmId = await requireFarmId();
     const syncItem = async (colName: string, items: any[]) => {
       for (const item of items) {
         if (item && item.id) {
-          await setDoc(doc(db, colName, item.id), item, { merge: true });
+          await setDoc(doc(db, colName, item.id), { ...item, farmId }, { merge: true });
         }
       }
     };
@@ -192,10 +209,11 @@ export async function reconcileDatabaseWithFirestore(localDb: KemetDB): Promise<
   }
 
   try {
+    const farmId = await requireFarmId();
     // Fetch remote collections safely
     const fetchRemoteCol = async <T extends { id: string }>(colName: string): Promise<T[]> => {
       try {
-        const snap = await getDocs(collection(db, colName));
+        const snap = await getDocs(query(collection(db, colName), where('farmId', '==', farmId)));
         return snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as T));
       } catch (err) {
         result.errors.push(`Failed to fetch remote collection ${colName}: ${err instanceof Error ? err.message : String(err)}`);
@@ -319,12 +337,13 @@ export async function verifyFirestoreSync(localDb: KemetDB): Promise<SyncStatusR
   }
 
   try {
+    const farmId = await requireFarmId();
     let allSynced = true;
     let remoteTotal = 0;
 
     for (const col of collections) {
       try {
-        const snap = await getDocs(collection(db, col.name));
+        const snap = await getDocs(query(collection(db, col.name), where('farmId', '==', farmId)));
         const remoteCount = snap.size;
         remoteTotal += remoteCount;
         const synced = snap.size === col.local.length;
@@ -371,13 +390,15 @@ export async function syncUserProfileToFirestore(user: FirebaseUser): Promise<Us
       // Doc might not exist yet
     }
 
-    const profile: UserProfile = {
+    const { isAdmin, farmId } = await getAuthorizationClaims(user);
+    const profile: UserProfile & { farmId?: string } = {
       uid: user.uid,
       email: user.email || 'no-email@kemetfarms.org',
       displayName: user.displayName || existingData.displayName || (user.email ? user.email.split('@')[0] : 'Operator'),
       createdAt: existingData.createdAt || user.metadata?.creationTime || new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
-      role: user.uid === ADMIN_USER_ID ? 'admin' : (existingData.role || 'user')
+      role: isAdmin ? 'admin' : 'user',
+      ...(farmId ? { farmId } : {})
     };
 
     await setDoc(userRef, profile, { merge: true });
@@ -388,40 +409,7 @@ export async function syncUserProfileToFirestore(user: FirebaseUser): Promise<Us
   }
 }
 
-export const defaultSystemUsers: UserProfile[] = [
-  {
-    uid: ADMIN_USER_ID,
-    email: 'admin@kemetfarms.org',
-    displayName: 'System Admin',
-    createdAt: '2026-07-20T08:00:00.000Z',
-    lastLoginAt: new Date().toISOString(),
-    role: 'admin'
-  },
-  {
-    uid: 'user-op-001',
-    email: 'ogunremi.segun@kemetfarms.org',
-    displayName: 'Olusegun Ogunremi (Field Supervisor)',
-    createdAt: '2026-07-21T10:15:00.000Z',
-    lastLoginAt: '2026-07-26T09:30:00.000Z',
-    role: 'user'
-  },
-  {
-    uid: 'user-op-002',
-    email: 'joel.awobenu@kemetfarms.org',
-    displayName: 'Awobenu Joel (Land Clearing Lead)',
-    createdAt: '2026-07-22T14:20:00.000Z',
-    lastLoginAt: '2026-07-25T16:45:00.000Z',
-    role: 'user'
-  },
-  {
-    uid: 'user-op-003',
-    email: 'femi.olaboyejo@kemetfarms.org',
-    displayName: 'Olufemi Olaboyejo (Agronomist)',
-    createdAt: '2026-07-23T11:00:00.000Z',
-    lastLoginAt: '2026-07-26T11:50:00.000Z',
-    role: 'user'
-  }
-];
+export const defaultSystemUsers: UserProfile[] = [];
 
 // Fetch all registered users from Firestore for the Admin view
 export async function fetchAllUsersFromFirestore(): Promise<UserProfile[]> {
@@ -463,7 +451,8 @@ export async function fetchAllUsersFromFirestore(): Promise<UserProfile[]> {
 // Fetch all media/uploaded items from Firestore
 export async function fetchAllUserMediaItems(): Promise<MediaItem[]> {
   try {
-    const snap = await getDocs(collection(db, 'mediaItems'));
+    const farmId = await requireFarmId();
+    const snap = await getDocs(query(collection(db, 'mediaItems'), where('farmId', '==', farmId)));
     const items: MediaItem[] = [];
     snap.forEach((docSnap) => {
       items.push(docSnap.data() as MediaItem);
@@ -474,5 +463,4 @@ export async function fetchAllUserMediaItems(): Promise<MediaItem[]> {
     return [];
   }
 }
-
 

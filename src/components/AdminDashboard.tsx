@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, MediaItem } from '../types';
-import { fetchAllUsersFromFirestore, fetchAllUserMediaItems, defaultSystemUsers, ADMIN_USER_ID } from '../utils/firestoreDb';
+import { fetchAllUsersFromFirestore, fetchAllUserMediaItems, defaultSystemUsers } from '../utils/firestoreDb';
 import { KemetDB } from '../utils/mockDb';
 import { 
   ShieldCheck, 
@@ -351,7 +351,7 @@ export default function AdminDashboard({
               </span>
               <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-2xs font-mono">
                 <span>UID:</span>
-                <span className="font-bold">{ADMIN_USER_ID}</span>
+                <span className="font-bold">Firebase custom claim</span>
               </span>
             </div>
             
@@ -539,7 +539,7 @@ export default function AdminDashboard({
                   </tr>
                 ) : (
                   filteredUsers.map((user) => {
-                    const isCurrentAdmin = user.uid === ADMIN_USER_ID;
+                    const isCurrentAdmin = user.role === 'admin';
                     const fileCount = user.uploadedFilesCount || 0;
 
                     return (
@@ -995,4 +995,3 @@ export default function AdminDashboard({
     </div>
   );
 }
-
